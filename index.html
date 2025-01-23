@@ -39,6 +39,8 @@
         <button id="captureBack">Capture Back Image</button>
         <br>
         <button id="calculateDimensions" disabled>Calculate Dimensions</button>
+        <br>
+        <button id="cameraToggle">Switch Camera</button>
     </div>
     <video id="video" autoplay playsinline></video>
     <canvas id="canvas"></canvas>
@@ -52,8 +54,11 @@
         const captureSideButton = document.getElementById('captureSide');
         const captureBackButton = document.getElementById('captureBack');
         const calculateButton = document.getElementById('calculateDimensions');
+        const cameraToggleButton = document.getElementById('cameraToggle');
         let frontImage, sideImage, backImage;
         let poseNet;
+        let currentStream;
+        let videoDeviceId;
 
         async function loadPoseNet() {
             console.log("Loading PoseNet model...");
@@ -61,14 +66,41 @@
             console.log("PoseNet model is loaded");
         }
 
-        async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        async function setupCamera(deviceId = null) {
+            // Stop current stream if any
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            const constraints = {
+                video: {
+                    facingMode: deviceId ? undefined : "user", // If no deviceId is provided, default to front camera
+                    deviceId: deviceId ? { exact: deviceId } : undefined
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            currentStream = stream;
             video.srcObject = stream;
-            return new Promise((resolve) => {
-                video.onloadedmetadata = () => {
-                    resolve(video);
-                };
-            });
+        }
+
+        async function getCameraDevices() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            return devices.filter(device => device.kind === 'videoinput');
+        }
+
+        async function switchCamera() {
+            const devices = await getCameraDevices();
+            const currentDeviceIndex = devices.findIndex(device => device.deviceId === videoDeviceId);
+
+            if (currentDeviceIndex === -1 || devices.length <= 1) {
+                console.log("No other camera available");
+                return;
+            }
+
+            const nextDeviceIndex = (currentDeviceIndex + 1) % devices.length;
+            videoDeviceId = devices[nextDeviceIndex].deviceId;
+            setupCamera(videoDeviceId);
         }
 
         function captureImage() {
@@ -78,6 +110,18 @@
             const img = new Image();
             img.src = canvas.toDataURL('image/png');
             return img;
+        }
+
+        async function detectPose(image) {
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+
+            const pose = await poseNet.estimateSinglePose(canvas, {
+                flipHorizontal: false
+            });
+
+            return pose;
         }
 
         function calculateDimensions(poseFront, poseSide, poseBack, height) {
@@ -97,18 +141,6 @@
             const konfekcija = dimensions.chest < 90 ? 48 : dimensions.chest < 110 ? 52 : 56;
 
             return { dimensions, size, konfekcija };
-        }
-
-        async function detectPose(image) {
-            canvas.width = image.width;
-            canvas.height = image.height;
-            ctx.drawImage(image, 0, 0);
-
-            const pose = await poseNet.estimateSinglePose(canvas, {
-                flipHorizontal: false
-            });
-
-            return pose;
         }
 
         async function processImages() {
@@ -165,8 +197,12 @@
 
         calculateButton.addEventListener('click', processImages);
 
+        // Button for toggling camera
+        cameraToggleButton.addEventListener('click', switchCamera);
+
         loadPoseNet();
-        setupCamera();
+        setupCamera(); // Set up the camera initially
+
     </script>
 </body>
 </html>
