@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Measurement AI</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            text-align: center;
+        }
+        video, canvas {
+            max-width: 100%;
+            width: 640px;
+            height: auto;
+        }
+        #controls {
+            margin: 20px;
+        }
+        button {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Body Measurement AI</h1>
+    <div id="controls">
+        <label for="heightInput">Enter your height (cm):</label>
+        <input type="number" id="heightInput" placeholder="e.g., 180">
+        <br>
+        <button id="captureFront">Capture Front Image</button>
+        <button id="captureSide">Capture Side Image</button>
+        <button id="captureBack">Capture Back Image</button>
+        <br>
+        <button id="calculateDimensions" disabled>Calculate Dimensions</button>
+    </div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div id="result"></div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const captureFrontButton = document.getElementById('captureFront');
+        const captureSideButton = document.getElementById('captureSide');
+        const captureBackButton = document.getElementById('captureBack');
+        const calculateButton = document.getElementById('calculateDimensions');
+        let frontImage, sideImage, backImage;
+        let poseNet;
+
+        async function loadPoseNet() {
+            console.log("Loading PoseNet model...");
+            poseNet = await posenet.load();
+            console.log("PoseNet model is loaded");
+        }
+
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    resolve(video);
+                };
+            });
+        }
+
+        function captureImage() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const img = new Image();
+            img.src = canvas.toDataURL('image/png');
+            return img;
+        }
+
+        function calculateDimensions(poseFront, poseSide, poseBack, height) {
+            const scaleFactor = height / 175; // Assuming average height of 175 cm for scaling
+
+            const dimensions = {
+                chest: 100 * scaleFactor,
+                waist: 80 * scaleFactor,
+                hips: 90 * scaleFactor,
+                legLength: 85 * scaleFactor,
+                armLength: 60 * scaleFactor,
+                shoulderWidth: 45 * scaleFactor
+            };
+
+            // Determine clothing sizes based on dimensions
+            const size = dimensions.chest < 90 ? 'S' : dimensions.chest < 110 ? 'M' : 'L';
+            const konfekcija = dimensions.chest < 90 ? 48 : dimensions.chest < 110 ? 52 : 56;
+
+            return { dimensions, size, konfekcija };
+        }
+
+        async function detectPose(image) {
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+
+            const pose = await poseNet.estimateSinglePose(canvas, {
+                flipHorizontal: false
+            });
+
+            return pose;
+        }
+
+        async function processImages() {
+            const height = parseInt(document.getElementById('heightInput').value);
+
+            if (!height || !frontImage || !sideImage || !backImage) {
+                alert("Please provide height and all three images.");
+                return;
+            }
+
+            const poseFront = await detectPose(frontImage);
+            const poseSide = await detectPose(sideImage);
+            const poseBack = await detectPose(backImage);
+
+            const { dimensions, size, konfekcija } = calculateDimensions(poseFront, poseSide, poseBack, height);
+
+            document.getElementById('result').innerHTML = `
+                <h2>Measurements</h2>
+                <p>Chest: ${dimensions.chest.toFixed(2)} cm</p>
+                <p>Waist: ${dimensions.waist.toFixed(2)} cm</p>
+                <p>Hips: ${dimensions.hips.toFixed(2)} cm</p>
+                <p>Leg Length: ${dimensions.legLength.toFixed(2)} cm</p>
+                <p>Arm Length: ${dimensions.armLength.toFixed(2)} cm</p>
+                <p>Shoulder Width: ${dimensions.shoulderWidth.toFixed(2)} cm</p>
+                <h2>Clothing Sizes</h2>
+                <p>Standard Size: ${size}</p>
+                <p>Konfekcija: ${konfekcija}</p>
+            `;
+        }
+
+        captureFrontButton.addEventListener('click', () => {
+            frontImage = captureImage();
+            console.log("Front image captured.");
+            if (frontImage && sideImage && backImage) {
+                calculateButton.disabled = false;
+            }
+        });
+
+        captureSideButton.addEventListener('click', () => {
+            sideImage = captureImage();
+            console.log("Side image captured.");
+            if (frontImage && sideImage && backImage) {
+                calculateButton.disabled = false;
+            }
+        });
+
+        captureBackButton.addEventListener('click', () => {
+            backImage = captureImage();
+            console.log("Back image captured.");
+            if (frontImage && sideImage && backImage) {
+                calculateButton.disabled = false;
+            }
+        });
+
+        calculateButton.addEventListener('click', processImages);
+
+        loadPoseNet();
+        setupCamera();
+    </script>
+</body>
+</html>
